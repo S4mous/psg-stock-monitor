@@ -1,0 +1,64 @@
+name: PSG Stock Monitor
+ 
+on:
+  schedule:
+    # Toutes les 5 min (GitHub peut retarder l'execution de plusieurs minutes).
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+ 
+# Necessaire pour que le job puisse committer stock_state.json dans le repo.
+permissions:
+  contents: write
+ 
+# Evite que deux executions se chevauchent et se battent sur le commit d'etat.
+concurrency:
+  group: psg-stock-monitor
+  cancel-in-progress: false
+ 
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+ 
+    steps:
+      # 1) Le checkout ramene aussi le stock_state.json deja commite -> etat restaure.
+      - name: Checkout repo
+        uses: actions/checkout@v4
+ 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+ 
+      - name: Install dependencies
+        run: pip install "requests==2.32.3" "beautifulsoup4==4.12.3" "twilio==9.3.7"
+ 
+      # 2) Le script lit l'etat present dans le repo, puis le reecrit.
+      - name: Run stock checker
+        env:
+          PRODUCT_URL:       ${{ secrets.PRODUCT_URL }}
+          TARGET_SIZE:       ${{ secrets.TARGET_SIZE }}
+          EMAIL_SENDER:      ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD:    ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER:    ${{ secrets.EMAIL_RECEIVER }}
+          TWILIO_SID:        ${{ secrets.TWILIO_SID }}
+          TWILIO_TOKEN:      ${{ secrets.TWILIO_TOKEN }}
+          TWILIO_FROM_PHONE: ${{ secrets.TWILIO_FROM_PHONE }}
+          TWILIO_TO_PHONE:   ${{ secrets.TWILIO_TO_PHONE }}
+          TWILIO_FROM_WA:    ${{ secrets.TWILIO_FROM_WA }}
+          TWILIO_TO_WA:      ${{ secrets.TWILIO_TO_WA }}
+          DISCORD_WEBHOOK:   ${{ secrets.DISCORD_WEBHOOK }}
+        run: python psg_monitor.py
+ 
+      # 3) On persiste l'etat en le committant (seulement s'il a change).
+      - name: Persist state
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain stock_state.json)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add stock_state.json
+            git commit -m "chore: update stock state [skip ci]"
+            git push
+          else
+            echo "Etat inchange, rien a committer."
+          fi
